@@ -1,118 +1,263 @@
-import Image from "next/image";
-import { Inter } from "next/font/google";
+import { useEffect, useState, useMemo, useCallback, Key } from "react";
+import { initNotification } from "@/utils/notification";
+import {
+  Table,
+  TableHeader,
+  TableColumn,
+  TableBody,
+  TableRow,
+  TableCell,
+  Pagination,
+  Selection,
+  Spinner,
+} from "@nextui-org/react";
+import { IToken, Address, IRowType, IPair } from "@/types";
+import { Pair } from '@/utils/pair';
+import axios from 'axios';
+axios.defaults.baseURL = 'http://192.168.147.90:3001';
 
-const inter = Inter({ subsets: ["latin"] });
+
+
+
+let tokenInfos: Map<Address, IToken> = new Map<Address, IToken>();
+let pairInfos: Map<Address, Pair> = new Map<Address, Pair>();
 
 export default function Home() {
+  useEffect(() => {
+    //initSocket();
+    initNotification();
+
+    // Re-render every second
+    const renderInterval = setInterval(() => {
+      setSeconds(prevSeconds => prevSeconds + 1);
+    }, 1000);
+
+    const grabInterval = setInterval(getPairInfo.bind(this, 1), 1000 * 3);
+
+    const poolCountInterval = setInterval(getPoolCount.bind(this), 1000 * 5);
+
+    return () => {
+      clearInterval(renderInterval);
+      clearInterval(grabInterval);
+      clearInterval(poolCountInterval);
+    };
+  }, []);
+
+  const getPairInfo = (page: number): void => {
+    setLoading(true);
+    axios.post('/get_pairs', {
+      page: page
+    }).then(response => {
+      if (response.status === 200 && response.data.pairs.length > 0) {
+        let pairs: IPair[] = response.data.pairs;
+        let tokens: {
+          [address: Address]: IToken
+        } = response.data.tokens;
+
+        pairInfos.clear();
+        for (let pair of pairs) {
+          console.log(tokens[pair.quoteToken]);
+          pairInfos.set(pair.address, new Pair(pair, tokens[pair.baseToken], tokens[pair.quoteToken]));
+        }
+
+        tokenInfos.clear();
+        Object.keys(tokens).forEach(tokenAddress => tokenInfos.set(tokenAddress, tokens[tokenAddress]));
+
+        setLoading(false);
+
+      }
+    })
+  }
+  const getPoolCount = (): void => {
+    axios.get('/get_pair_count')
+      .then(response => {
+        if (response.status === 200 && response.data.count) {
+          setPoolCount(count => parseInt(response.data.count));
+        }
+      })
+  }
+
+  const columns = [
+    {
+      key: "token",
+      label: "TOKEN",
+      width: "30%",
+    },
+    {
+      key: "price",
+      label: "PRICE",
+      width: "10%",
+    },
+    {
+      key: "age",
+      label: "AGE",
+      width: "10%",
+    },
+    {
+      key: "buys",
+      label: "BUYS",
+      width: "10%",
+    },
+    {
+      key: "sells",
+      label: "SELLS",
+      width: "10%",
+    },
+    {
+      key: "volume",
+      label: "VOLUME",
+      width: "10%",
+    },
+    {
+      key: "liquidity",
+      label: "LIQUIDITY",
+      width: "10%",
+    },
+    {
+      key: "mcap",
+      label: "MCAP",
+      width: "10%",
+    },
+  ];
+
+  const [seconds, setSeconds] = useState<number>(0);
+
+  const rows: IRowType[] = useMemo(() => {
+    let ret = [];
+    pairInfos.forEach(value => ret.push(value.row()));
+    return ret;
+  }, [seconds]);
+  const [status, setStatus] = useState(0);
+
+  const [loading, setLoading] = useState<boolean>(false);
+  const loadingState: "loading" | "idle" = useMemo(() => loading ? "loading" : "idle", [loading]);
+  // Pagination functionaliy
+  const [poolCount, setPoolCount] = useState<number>(0);
+  const [page, setPage] = useState(1);
+  const rowsPerPage: number = 15;
+  const pages: number = useMemo(() => Math.ceil(poolCount / rowsPerPage), [poolCount]);
+  const items: IRowType[] = useMemo(() => {
+    const start = (page - 1) * rowsPerPage;
+    const end = start + rowsPerPage;
+    return rows.slice(start, end);
+  }, [page, rows]);
+
+
+  const renderCell = useCallback((row: IRowType, columnKey: Key) => {
+    const cellValue = row[columnKey as keyof IRowType];
+    switch (columnKey) {
+      case "token":
+        return <>
+          {row.token}
+        </>
+
+      case "price": {
+        let ret: string | string[] = Pair.showMoney(row.price);
+        // console.log(ret);
+        if (typeof ret === 'object') {
+          return <>
+            {ret[0]}<sub>{ret[1]}</sub>{ret[2]}
+          </>
+        }
+        return <>
+          {ret}
+        </>
+      }
+
+      case "age":
+        return <>{row.age}</>
+
+      case "buys":
+      case "sells":
+        return <>{cellValue}</>
+
+      case "volume":
+        return <>{Pair.showMoney(row.volume)}</>
+
+      case "liquidity":
+        return <>{Pair.showMoney(row.liquidity)}</>
+
+      case "mcap":
+        return <>{Pair.showMoney(row.mcap)}</>
+    }
+  }, []);
+
+  const onSelectionChange = (key: Selection) => {
+    if (key !== 'all') {
+      let value = [...key];
+      if (value[0] as string === undefined) return;
+      let pairInfo = pairInfos.get(value[0] as string);
+      console.log(pairInfo);
+      console.log(tokenInfos.get(pairInfo.baseToken));
+      console.log(tokenInfos.get(pairInfo.quoteToken));
+    }
+  }
+
+  console.log(loadingState);
+
   return (
-    <main
-      className={`flex min-h-screen flex-col items-center justify-between p-24 ${inter.className}`}
-    >
-      <div className="z-10 max-w-5xl w-full items-center justify-between font-mono text-sm lg:flex">
-        <p className="fixed left-0 top-0 flex w-full justify-center border-b border-gray-300 bg-gradient-to-b from-zinc-200 pb-6 pt-8 backdrop-blur-2xl dark:border-neutral-800 dark:bg-zinc-800/30 dark:from-inherit lg:static lg:w-auto  lg:rounded-xl lg:border lg:bg-gray-200 lg:p-4 lg:dark:bg-zinc-800/30">
-          Get started by editing&nbsp;
-          <code className="font-mono font-bold">pages/index.tsx</code>
-        </p>
-        <div className="fixed bottom-0 left-0 flex h-48 w-full items-end justify-center bg-gradient-to-t from-white via-white dark:from-black dark:via-black lg:static lg:h-auto lg:w-auto lg:bg-none">
-          <a
-            className="pointer-events-none flex place-items-center gap-2 p-8 lg:pointer-events-auto lg:p-0"
-            href="https://vercel.com?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <>
+      <div className="w-full p-5">
+        <div className="w-full p-5 flex flex-row-reverse align-middle">
+          <span className="relative flex h-3 w-3">
+            <span
+              className={
+                "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 " +
+                (status === WebSocket.OPEN ? "bg-green-400" : "bg-red-400")
+              }
+            ></span>
+            <span
+              className={
+                "relative inline-flex rounded-full h-3 w-3 " +
+                (status === WebSocket.OPEN ? "bg-green-400" : "bg-red-400")
+              }
+            ></span>
+          </span>
+        </div>
+        <div className="w-full top-5">
+          <Table
+            className="w-full block"
+            aria-label="Example static collection table"
+            selectionMode="single"
+            color="primary"
+            onSelectionChange={onSelectionChange}
+            bottomContent={
+              pages > 0 ? (
+                <div className="flex w-full justify-center">
+                  <Pagination
+                    showControls
+                    showShadow
+                    color="secondary"
+                    page={page}
+                    total={pages}
+                    onChange={setPage}
+                  />
+                </div>
+              ) : null
+            }
           >
-            By{" "}
-            <Image
-              src="/vercel.svg"
-              alt="Vercel Logo"
-              className="dark:invert"
-              width={100}
-              height={24}
-              priority
-            />
-          </a>
+            <TableHeader columns={columns}>
+              {(column) => (
+                <TableColumn
+                  style={{ width: column.width ?? "inherit" }}
+                  key={column.key}
+                >
+                  {column.label}
+                </TableColumn>
+              )}
+            </TableHeader>
+            <TableBody items={items} loadingContent={<Spinner />} loadingState={loadingState}>
+              {(item) => (
+                <TableRow key={item.key} className="cursor-pointer">
+                  {(columnKey) => (
+                    <TableCell>{renderCell(item, columnKey)}</TableCell>
+                  )}
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
         </div>
       </div>
-
-      <div className="relative flex place-items-center before:absolute before:h-[300px] before:w-full sm:before:w-[480px] before:-translate-x-1/2 before:rounded-full before:bg-gradient-radial before:from-white before:to-transparent before:blur-2xl before:content-[''] after:absolute after:-z-20 after:h-[180px] after:w-full sm:after:w-[240px] after:translate-x-1/3 after:bg-gradient-conic after:from-sky-200 after:via-blue-200 after:blur-2xl after:content-[''] before:dark:bg-gradient-to-br before:dark:from-transparent before:dark:to-blue-700/10 after:dark:from-sky-900 after:dark:via-[#0141ff]/40 before:lg:h-[360px]">
-        <Image
-          className="relative dark:drop-shadow-[0_0_0.3rem_#ffffff70] dark:invert"
-          src="/next.svg"
-          alt="Next.js Logo"
-          width={180}
-          height={37}
-          priority
-        />
-      </div>
-
-      <div className="mb-32 grid text-center lg:max-w-5xl lg:w-full lg:mb-0 lg:grid-cols-4 lg:text-left">
-        <a
-          href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Docs{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Find in-depth information about Next.js features and API.
-          </p>
-        </a>
-
-        <a
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Learn{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Learn about Next.js in an interactive course with&nbsp;quizzes!
-          </p>
-        </a>
-
-        <a
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Templates{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Discover and deploy boilerplate example Next.js&nbsp;projects.
-          </p>
-        </a>
-
-        <a
-          href="https://vercel.com/new?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Deploy{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50 text-balance`}>
-            Instantly deploy your Next.js site to a shareable URL with Vercel.
-          </p>
-        </a>
-      </div>
-    </main>
+    </>
   );
 }
